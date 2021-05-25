@@ -26,7 +26,7 @@ clean_data() # cleans the data
 sale_listings_imputed <- impute_data() # imputes size values and returns a new dataframe
 
 #ml_setup sometimes does not work
-ml_setup(sale_listings_imputed) # splits the input data into test and training sets
+#ml_setup(sale_listings_imputed) # splits the input data into test and training sets
 ```
 
 ```{r text processing}
@@ -148,6 +148,15 @@ ANYHOUSE     = 'X'
 AUCTION      = 'Z'
 FRACTIONAL   = 'Y'"
 ```
+### Sample listing 
+```{r}
+sample_listing <- sale_listings_ss %>%
+  filter(property_id == 9193686)
+
+score_sample <- data.frame(id = c(192, 192, 192, 192, 192, 192, 192),
+           word = c("outstanding", "glorious", "beautifully", "tops", "beautifully", "excellent", "glorious"),
+           values = c(5, 2, 3, 2, 3, 3, 2))
+```
 
 
 
@@ -162,24 +171,66 @@ psychTools::df2latex(descriptive_num)
 ```
 
 ```{r descriptive stats for cat var}
-descriptive_df_cat <- sentiments_join %>%
-  mutate(hw_floors = as.factor(hw_floors),
-         stainless_steel= as.factor(stainless_steel),
-         pet_friendly = as.factor(pet_friendly),
-         wd = as.factor(wd))
-furniture::table1(descriptive_df_cat, county, unittype, is_historic, city_group, hw_floors, stainless_steel, pet_friendly, wd, output = "latex2", na.rm = TRUE )
+furniture::table1(sale_listings_ss, county, unittype, is_historic, city_group, state, hw_floors, stainless_steel, pet_friendly, wd, steel_app, fitness, marble, master, custom, floor, private, window, dining, offer, sqft, hudson_river, renovate, closet_space, spacious, storage, roof_deck, park, balcony, courtyard, view, natural_light, en_suite, tree_lined, central_park, output = "latex2", na.rm = TRUE)
 ```
 
-## Visualization of price & sentiment score by county 
+### Summary table for linear regression between word count and sentiment score
+\begin{table}[!htbp] \centering 
+  \caption{Regression Output of Word Count and Sentiment Score} 
+  \label{} 
+\begin{tabular}{@{\extracolsep{5pt}}lc} 
+\\[-1.8ex]\hline 
+\hline \\[-1.8ex] 
+ & \multicolumn{1}{c}{\textit{Dependent variable:}} \\ 
+\cline{2-2} 
+\\[-1.8ex] & score \\ 
+\hline \\[-1.8ex] 
+ word\_count & 0.062$^{***}$ \\ 
+  & (0.0003) \\ 
+  & \\ 
+ Constant & 0.519$^{***}$ \\ 
+  & (0.063) \\ 
+  & \\ 
+\hline \\[-1.8ex] 
+Observations & 41,325 \\ 
+R$^{2}$ & 0.510 \\ 
+Adjusted R$^{2}$ & 0.510 \\ 
+Residual Std. Error & 7.257 (df = 41323) \\ 
+F Statistic & 43,011.900$^{***}$ (df = 1; 41323) \\ 
+\hline 
+\hline \\[-1.8ex] 
+\textit{Note:}  & \multicolumn{1}{r}{$^{*}$p$<$0.1; $^{**}$p$<$0.05; $^{***}$p$<$0.01} \\ 
+\end{tabular} 
+\end{table} 
+
+## Visualization 
+
+### Count n. of listings by county 
+```{r fig.height=3, fig.width=5}
+county_count <- sale_listings_ss %>%
+  group_by(county) %>%
+  summarize(count = n()) %>%
+ggplot(aes(y = fct_reorder(county, count), x=count)) +
+  geom_col(fill="#339999") +
+  geom_text(aes(label=count), hjust= -0.2, size=3) +
+  labs(title = "Number of Listings by County", y = "County") +
+  theme_minimal()
+```
+
+### Price & sentiment score by county 
 ```{r}
 library(ggridges)
 mean_price <- sale_listings_ss %>%
   group_by(county) %>%
   summarise(mean_price = mean(price))
 
+select_county <- sale_listings_ss %>%
+  filter(!county %in% c("Nassau County", "Ocean County", "Union County", "Monmouth County", "Essex County")) 
+unique(select_county$county)
+
 #Monmouth county only has one entry 
 #essex county in NJ only has one entry 
-ggplot(sale_listings_ss, aes(x = score, y = fct_reorder(county, score, .fun = mean))) +
+sentiment_p <- ggplot(select_county, aes(x = score, y = fct_reorder(county, score, .fun = mean))) +
   geom_density_ridges(aes(fill = county),quantile_lines=TRUE,
                       quantile_fun=function(x,...)mean(x)) +
   scale_fill_viridis_d() + 
@@ -187,10 +238,12 @@ ggplot(sale_listings_ss, aes(x = score, y = fct_reorder(county, score, .fun = me
   labs(x = "Sentiment Score", 
        y="County", 
        title = "Density Plot of Sentiment Scores by County",
-       subtitle = "arranged by mean") +
+       subtitle = "arranged by mean",
+       caption = "Note: only include county with at least 10 listings") +
   theme(legend.position = "none") 
+sentiment_p
 
-ggplot(sale_listings_ss, aes(x = price,
+price_p <- ggplot(select_county, aes(x = price,
        y = fct_reorder(county, price, .fun = mean))) +
   geom_density_ridges(aes(fill = county),quantile_lines=TRUE,
                       quantile_fun=function(x,...)mean(x)) +
@@ -200,8 +253,71 @@ ggplot(sale_listings_ss, aes(x = price,
   labs(x = "Price", 
        y="County", 
        title = "Density Plot of Price by County",
-       subtitle = "arranged by mean") +
+       subtitle = "arranged by mean",
+       caption = "Note: only include county with at least 10 listings") +
   theme(legend.position = "none") 
+price_p
+```
+
+
+
+### Single Word Counts 
+```{r fig.height=4, fig.width=6}
+library(SnowballC)
+library(tidytext)
+
+sale_text_tk <- sale_listings_imputed %>%
+  unnest_tokens(word, listing_description) %>%
+  anti_join(stop_words) 
+
+sale_tk_count <- sale_text_tk %>%
+   count(word, sort = TRUE) %>%
+  arrange(desc(n))
+
+uni_freq <- sale_tk_count %>%
+  head(50) %>%
+  ggplot(aes(y=reorder(word,n), x = n)) + 
+  geom_bar(stat = "identity", fill="#339999") + 
+  labs(title = "Top 50 Frequent Words in Listing Descriptions", x = "Count", y="Word") +
+  theme_minimal()
+uni_freq
+
+#stemming 
+sale_tk_stem <- sale_listings_imputed %>%
+  unnest_tokens(word, listing_description) %>%
+  anti_join(stop_words) %>%
+  mutate(stem = wordStem(word)) 
+
+sale_tk_stem_count <- sale_tk_stem %>%
+  count(stem, sort = TRUE) %>%
+  arrange(desc(n))
+
+uni_stem_freq <- sale_tk_stem_count %>%
+  head(50) %>%
+  ggplot(aes(y=reorder(stem,n), x = n)) + 
+  geom_bar(stat = "identity")
+```
+
+### Bigram Counts 
+```{r fig.height=4, fig.width=6}
+sale_bigram <- sale_listings_imputed %>%
+  unnest_tokens(bigram, listing_description, token = 'ngrams', n=2) %>% 
+  separate(bigram, c('word1', 'word2'), sep = " ") %>%
+  filter(!word1 %in% stop_words$word) %>%
+  filter(!word2 %in% stop_words$word) %>%
+  unite(bigram, word1, word2, sep = " ") 
+
+sale_bi_count <- sale_bigram %>%
+  count(bigram, sort = TRUE) %>%
+  arrange(desc(n))
+
+bi_freq <- sale_bi_count %>%
+  head(50) %>%
+  ggplot(aes(y=reorder(bigram,n), x = n)) + 
+  geom_bar(stat = "identity", fill="#339999") + 
+  labs(title = "Top 50 Frequent Bigrams in Listing Descriptions", x = "Count", y="Bigram") +
+  theme_minimal()
+bi_freq
 ```
 
 

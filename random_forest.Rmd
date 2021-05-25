@@ -13,6 +13,7 @@ library(MLmetrics)
 library(textdata)
 library(tidytext)
 library(SnowballC)
+library(caret)
 ```
 
 ```{r message=FALSE, warning=FALSE}
@@ -187,6 +188,7 @@ test_caret_rf <- test %>%
 MAPE(y_pred = test_caret_rf$price_hat, y_true = test$price)
 RMSE(test_caret_rf$price_hat, test$price)
 RMSLE(test_caret_rf$price_hat, test$price)
+# summary of models 
 
 # bed
 # bath
@@ -228,24 +230,6 @@ RMSLE(test_caret_rf$price_hat, test$price)
 # RMSE 396093.3
 # RMSLE 0.3228432
 
-```
-
-```{r adding sentiment scores to model}
-train3 <- sentiments_join %>% sample_frac(.70)
-test3 <- sentiments_join %>% anti_join(train3)
-
-tree_sentiments = rpart(price ~ bedrooms + bathrooms + size_sqft + unittype + county + is_historic + floor_count + stainless_steel + hw_floors + wd + pet_friendly + city_group + score, data = train3, method = "anova", control = rpart.control(cp = 0.005))
-fancyRpartPlot(tree_sentiments)
-
-sale_listings_rf3 <- randomForest(price ~ bedrooms + bathrooms + size_sqft + unittype + county + is_historic + floor_count + stainless_steel + hw_floors + wd + pet_friendly + city_group + score, data = train3, ntree = 10, na.action = na.omit) # Elaine & Emma think NAs are causing error
-
-price_prediction_rf3 <- predict(sale_listings_rf3, test3, type = "response")
-varImpPlot(sale_listings_rf3)
-
-price_prediction_rf3 <- as.data.frame(price_prediction_rf3)
-price_prediction_rf3 <- as.integer(price_prediction_rf3$price_prediction_rf3)
-MAPE(y_pred = price_prediction_rf3, y_true = test3$price)
-RMSE(y_pred = price_prediction_rf3, y_true = test3$price)
 ```
 
 ```{r adding sentiment scores to model}
@@ -342,7 +326,21 @@ mtry_32 <- caret::train(price ~ .,
                           na.action = na.omit)
 
 varimp_m32 <- varImp(mtry_32)
-plot(varimp_m32, top = 50)
+varimp_32_df <-  as_tibble(varimp_m32$importance, rownames = "variable") %>%
+  arrange(desc(Overall)) %>%
+  head(20)
+plot(varimp_m32, top = 20)
+varImp(mtry_32)
+varImp(mtry_32, value = "nsubsets")
+varImp(mtry_32, scale = FALSE)
+
+
+varimp_p <- ggplot(data = varimp_32_df, aes(y=reorder(variable, Overall), x = Overall)) +
+  geom_point(color = "#000066") +
+  labs(title = "Top 20 Most Important Variables in Model with All Predictors",
+       x = "Importance Score",
+       y = "Variable") +
+  theme_bw()
 
 test_rf32 <- testt %>%
   mutate(price_hat = predict(mtry_32, testt))
@@ -354,7 +352,10 @@ RMSLE(test_rf32$price_hat, testt$price)
 #rmse 381930.2
 #rmlse 0.3063396
 colnames(sale_listings_tune)
+sale_listings_ss %>%
+  filter(score < 0)
 ```
+
 # Mtry result tab
 ```{r}
 result_tab <- best_rf[["results"]]
@@ -364,15 +365,15 @@ psychTools::df2latex(result_tab, digits = 3, short.names = FALSE, )
 # Comparison of models 
 ```{r}
 rf_metrics <- data.frame(Variables = c("bed, bath, 
-                                       size_sqft",
+                                       size in sqft",
                              "unittype",
                              "county",
-                             "is_historic",
-                             "floor_count",
-                             "city_group",
-                             "stainless_steel, 
-                             hw_floors, wd, pet",
-                             "sentiment_score",
+                             "is historic",
+                             "floor count",
+                             "city group",
+                            # "stainless_steel, 
+                            # hw_floors, wd, pet",
+                             "sentiment score",
                              "all variables"),
                     MAPE = c(0.600,
                              0.515,
@@ -380,7 +381,7 @@ rf_metrics <- data.frame(Variables = c("bed, bath,
                              0.329,
                              0.297,
                              0.270,
-                             0.266,
+                           #  0.266,
                              0.260,
                              0.248
                              ),
@@ -390,7 +391,7 @@ rf_metrics <- data.frame(Variables = c("bed, bath,
                              444032.5,
                              410053.5,
                              400027.5,
-                             396093.3,
+                             #396093.3,
                              390974,
                              381930.2
                              ),
@@ -400,12 +401,13 @@ rf_metrics <- data.frame(Variables = c("bed, bath,
                               0.372,
                               0.348,
                               0.326,
-                              0.322,
+                            #  0.322,
                               0.318,
                               0.306
                     ))
 ```
 
+### Visualization of metrics 
 ```{r metrics plot}
 rf_mape_plot <- rf_metrics %>%
 ggplot(aes(y = MAPE, x = fct_reorder(Variables, MAPE, .desc = TRUE))) + 
@@ -434,11 +436,10 @@ ggplot(aes(y = RMSLE, x = fct_reorder(Variables, RMSLE, .desc = TRUE))) +
  theme_bw() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
-rf_mape_plot
-  rf_rmse_plot
-  rf_rmsle_plot
-
+library(patchwork)
+rf_mape_plot / rf_rmse_plot
 ```
+
 
 
 https://rstudio-pubs-static.s3.amazonaws.com/71575_4068e2e6dc3d46a785ad7886426c37db.html
